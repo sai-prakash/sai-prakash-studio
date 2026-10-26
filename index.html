@@ -1012,12 +1012,52 @@ footer a{color:var(--ink-2)}
     </div>
   </section>
 
+<style>
+.st-mini{margin-top:2rem;border:1px solid var(--line);border-radius:18px;background:var(--paper-2);padding:20px}
+.st-mini-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:24px;align-items:start;margin-top:14px}
+.st-mini-grid .ds-screen{margin:0}
+.st-mini-explain ol{margin:0;padding-left:20px;display:grid;gap:10px}
+.st-mini-explain li{line-height:1.55}
+.st-mini-explain li b{color:var(--ink)}
+.st-mini-note{font-size:.875rem;color:var(--ink-2);margin-top:14px}
+#miniDone{margin-top:12px;font-weight:600;color:var(--indigo)}
+@media(max-width:720px){.st-mini-grid{grid-template-columns:1fr}}
+</style>
   <!-- STUDIO -->
   <section class="sec sec-line" id="studio" aria-labelledby="studio-h">
     <div class="wrap">
       <p class="label">Studio · live</p>
       <h2 id="studio-h" data-x>Ask an agent to build with it.</h2>
       <p class="sub">Type a brief. An agent writes a screen in this system's components, the page compiles it as it streams, and nine checks grade it. When a check fails, the agent gets one try to fix it.</p>
+      <div class="st-mini" id="stMini">
+        <p class="st-cap"><span>Small screen, live</span><span>Built only from system components</span></p>
+        <div class="st-mini-grid">
+          <div class="ds-screen" role="region" aria-label="Small live screen: book club sign-up">
+            <section class="ds-sec" data-p="0">
+              <p class="ds-label">Book club</p>
+              <h4 class="ds-h2">Join the Sunday reading club.</h4>
+              <div class="ds-stack">
+                <p class="ds-text muted">One book a month. One meeting a month. No homework.</p>
+                <div class="ds-field"><label for="miniName">Your name</label><input id="miniName" type="text" placeholder="Asha" autocomplete="off"></div>
+                <div class="ds-field"><label for="miniEmail">Email</label><input id="miniEmail" type="email" placeholder="asha@example.com" autocomplete="off"></div>
+                <div class="ds-row"><button type="button" class="ds-btn primary" id="miniJoin">Join the club</button></div>
+                <p id="miniDone" hidden role="status"></p>
+                <p class="ds-div" aria-hidden="true">॥</p>
+              </div>
+            </section>
+          </div>
+          <div class="st-mini-explain">
+            <p style="margin-top:0"><b>What this little screen proves.</b> It uses only Studio components — Section, Text, Field, Button, Divider — and nothing else. No raw styling, no outside parts.</p>
+            <ol>
+              <li><b>Brief in, JSON out.</b> An agent writes one JSON screen from the 19 components in this system. That is all it is allowed to write.</li>
+              <li><b>The page compiles it live.</b> The same renderer that builds the big screen below turns that JSON into this screen, in your browser.</li>
+              <li><b>Nine checks grade it.</b> Valid JSON, only system components, one primary action, labelled fields, headings in order, and four more. A failed check goes back to the agent once.</li>
+            </ol>
+            <p>Try it: type a name and press Join the club. The success state is live, in your browser — nothing is sent anywhere.</p>
+            <p class="st-mini-note">This mini screen is hand-written in the same components, so it works even where live builds do not. For a generated screen that fails and then fixes itself, replay “A reading-group sign-up (fails, then fixes)” below.</p>
+          </div>
+        </div>
+      </div>
       <form class="st-form" id="stForm" autocomplete="off">
         <label class="sr" for="brief">Brief for the agent</label>
         <input id="brief" maxlength="200" placeholder="Describe a screen, like a sign-up card for a book club">
@@ -3093,4 +3133,7 @@ const Tour = (() => {
 })();
 </script>
 
+<script>
+(function(){var b=document.getElementById("miniJoin");if(!b)return;b.addEventListener("click",function(){var n=document.getElementById("miniName").value.trim(),d=document.getElementById("miniDone");if(!n){d.textContent="Type your name first — every field has a label, and this one needs a value.";d.hidden=false;document.getElementById("miniName").focus();return;}d.textContent="Welcome, "+n+" — you are in. The first book lands in your inbox on Sunday.";d.hidden=false;b.textContent="Joined";b.disabled=true;});})();
+</script>
 </body></html>
