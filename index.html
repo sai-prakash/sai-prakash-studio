@@ -2448,7 +2448,10 @@ const Studio = (() => {
           }
           const gen = await T.pipeline("text-generation", "onnx-community/Qwen2.5-Coder-0.5B-Instruct", {
             device: key, dtype: "q4",
-            progress_callback: (pr) => { if (pr && pr.file) lastFile = pr.file; if (pr && pr.status === "progress" && pr.progress) status.textContent = "Downloading the on-device model — " + Math.round(pr.progress * 100) + "% (first run only, then cached)."; }
+            progress_callback: (pr) => { if (pr && pr.file) lastFile = pr.file; if (pr && pr.status === "progress") { // Transformers.js already reports progress as 0-100, not 0-1 (the old code multiplied by 100 again, hence 400% to 10000%). Prefer loaded/total when present, and clamp.
+              let pct = (pr.total > 0) ? (pr.loaded / pr.total * 100) : (pr.progress > 1 ? pr.progress : pr.progress * 100);
+              pct = Math.max(0, Math.min(100, Math.round(pct)));
+              status.textContent = "Downloading the on-device model — " + pct + "% (first run only, then cached)."; } }
           });
           gen._T = T; gen._device = key; localGen = gen;
           return gen;
