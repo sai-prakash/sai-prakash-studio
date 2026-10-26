@@ -99,6 +99,8 @@ Sai Prakash Studio v1.2: 12 color tokens, an eight-step type scale in rem, a spa
 - **Divider:** The double danda ends a section, the way it ends a verse.
 
 ## Studio
+
+- **Small screen, live:** a book-club sign-up built only from system components, working in the browser with a 3-step explanation (brief → JSON → compile → 9 checks).
 An agent turns a brief into a screen built only from these components. The page compiles the JSON as it streams and grades it with nine checks, then sends failures back to the agent once.
 - Valid JSON
 - Only system components
