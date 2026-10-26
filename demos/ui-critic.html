@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UI Critic — SmolVLM in your browser (prototype)</title>
+<meta name="description" content="Prototype: a small vision-language model proposes UI defects, deterministic checks verify them. Precomputed examples first, live SmolVLM opt-in.">
+<style>
+:root{--bg:#0c0d10;--card:#16171c;--line:#26272e;--text:#e9e8e3;--dim:#a3a39b;--acc:#e8a33d;--bad:#e5484d;--good:#46a758}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:0 22px 60px}a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
+header{border-bottom:1px solid var(--line);padding:28px 0}.eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--acc);font-weight:700}
+h1{font-size:clamp(30px,5vw,48px);line-height:1.1;margin:8px 0}.lede{color:var(--dim);max-width:62ch}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}.chip{border:1px solid var(--line);border-radius:999px;padding:4px 11px;font-size:12px;color:var(--dim)}
+.chip.live{border-color:var(--acc);color:var(--acc)}
+section{margin-top:44px}h2{font-size:24px;margin:0 0 8px}.sub{color:var(--dim);margin:0 0 16px}
+.sample-bar{display:flex;gap:10px;flex-wrap:wrap}.sample-bar button{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 14px;cursor:pointer;font-size:14px}
+.sample-bar button[aria-pressed="true"]{border-color:var(--acc);outline:2px solid var(--acc)}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}@media(max-width:680px){.pair{grid-template-columns:1fr}}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}.panel h3{margin:0 0 10px;font-size:16px}
+.panel svg{width:100%;height:auto;background:#fff;border-radius:8px;display:block}
+.box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-top:16px}
+.box h3{margin:0 0 8px}.box p{margin:6px 0;color:var(--dim)}
+pre{white-space:pre-wrap;word-break:break-word;background:#0a0a0c;border:1px solid var(--line);border-radius:8px;padding:14px;font-size:14px;color:var(--text);margin:10px 0}
+.pass{color:var(--good);font-weight:700}.fail{color:var(--bad);font-weight:700}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--dim)}
+button.primary{background:var(--acc);color:#141414;border:0;border-radius:8px;padding:11px 16px;font-weight:700;cursor:pointer}
+button.ghost{background:transparent;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:11px 16px;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}.warn{background:#2a1a08;border:1px solid #5a3d0a;border-radius:10px;padding:14px 16px;color:#f5d9a8}
+.small{font-size:13px;color:var(--dim)}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+<p class="eyebrow">Prototype · Not a benchmark</p>
+<h1>UI Critic: a small model proposes, code verifies.</h1>
+<p class="lede">Paste a UI, or pick a sample. SmolVLM-256M (in your browser, via WebGPU) describes what it sees and proposes defects. Deterministic checks then verify each proposal against the approved palette, states and layout — because a 256M model alone should never be the verdict.</p>
+<div class="chips"><span class="chip">Model: HuggingFaceTB/SmolVLM-256M-Instruct</span><span class="chip">Licence: Apache-2.0 (base model, per public model-card summaries — verify on the card before publishing)</span><span class="chip">Live: opt-in only · nothing leaves your tab</span><span class="chip live">First paint needs no download</span></div>
+</div></header>
+<main class="wrap">
+
+<section>
+<h2>1 · Pick a sample</h2>
+<p class="sub">Four pairs. Left: approved. Right: what an agent built. Each agent version has exactly one planted defect type — the kind Agent UI Check's pixel checks catch, but a similarity score misses.</p>
+<div class="sample-bar" id="sampleBar"></div>
+<div class="pair">
+<div class="panel"><h3>Approved</h3><div id="approvedSvg"></div><p class="small" id="approvedNote"></p></div>
+<div class="panel"><h3>Agent-built</h3><div id="agentSvg"></div><p class="small" id="agentNote"></p></div>
+</div>
+</section>
+
+<section>
+<h2>2 · What the model proposes (precomputed)</h2>
+<p class="sub">This text is an <strong>author-written stand-in</strong> in the style of a short VLM description. It is NOT a measured SmolVLM run. The live model, when you load it below, replaces it with its real output — and the eval table says so explicitly.</p>
+<div class="box"><h3 id="modelTitle">Model proposal</h3><pre id="modelOut"></pre><p class="small" id="modelLabel"></p></div>
+</section>
+
+<section>
+<h2>3 · What code verifies (deterministic)</h2>
+<p class="sub">The verifier reads the agent SVG's own fills, opacities and button positions and checks them against the approved palette, state and layout for that sample. For a real screenshot this step would sample pixels instead — see README for that next step. The verifier never reads the model's text, so it cannot agree with it by accident.</p>
+<div class="box"><div id="verifierOut"></div></div>
+<p><button class="primary" id="verifyBtn">Run verifier on this pair</button></p>
+</section>
+
+<section>
+<h2>4 · Live model (experimental, opt-in)</h2>
+<div class="warn"><strong>Honest warning:</strong> browser SmolVLM support is fragile. Public forum reports show the Transformers.js SmolVLM path failing at the processor step even when the model loads. This prototype therefore loads the model only when you ask, shows its real error verbatim if it fails, and never breaks the precomputed examples. Test in desktop Chrome/Edge with WebGPU. Safari has no WebGPU — expect the WASM path to be very slow or to fail.</div>
+<p style="margin-top:14px"><button class="primary" id="loadBtn">Load SmolVLM (WebGPU, q4)</button> <button class="ghost" id="askBtn" disabled>Ask the live model about this sample</button></p>
+<p class="small" id="loadStatus">Model not loaded. First load downloads the model files from Hugging Face and caches them in your browser — size varies by quantisation; watch the progress below, do not guess it.</p>
+<pre id="liveOut" style="display:none"></pre>
+</section>
+
+<section>
+<h2>5 · Eval — what this proves, and what it does not</h2>
+<table>
+<thead><tr><th>Sample</th><th>Planted defect</th><th>Stand-in model proposal</th><th>Deterministic verifier</th></tr></thead>
+<tbody>
+<tr><td>Primary button</td><td>Token — off-palette fill</td><td>Names the colour change ✓ (stand-in)</td><td>Catches it: fill not in approved palette ✓</td></tr>
+<tr><td>Disabled button</td><td>Missing state — looks enabled</td><td>Names the missing disabled state ✓ (stand-in)</td><td>Catches it: opacity/state check ✓</td></tr>
+<tr><td>Card stats</td><td>Spacing — value shifted</td><td>Names the misalignment ✓ (stand-in)</td><td>Catches it: button/value position shift ✓</td></tr>
+<tr><td>Modal confirm</td><td>Layout — primary action moved</td><td>Names the moved primary ✓ (stand-in)</td><td>Catches it: primary x-position vs approved ✓</td></tr>
+</tbody></table>
+<p class="small">This table is <strong>not</strong> a SmolVLM benchmark. The model column is author-written until a live run on a WebGPU machine replaces it. The verifier column is real code in this page — run it. Sample size is 4 hand-made SVGs, defects planted by the author, thresholds set by the author. Next steps: replace stand-ins with live runs, add pixel sampling for real screenshots, add true-negative controls (approved pairs that must pass), and report precision/recall over 50+ real agent outputs labelled by someone who did not write the verifier.</p>
+</section>
+
+<section>
+<h2>How it fits the portfolio</h2>
+<p>Find (Design System Search) → Prove (Evidence Finder) → Check (Agent UI Check, similarity + pixels) → <strong>Understand (this critic, vision + verifier)</strong>. Same thesis throughout: useful AI shows evidence, and a small model proposes while code decides.</p>
+<p class="small">Model: HuggingFaceTB/SmolVLM-256M-Instruct · Runtime: @huggingface/transformers in the browser, WebGPU with WASM fallback · Code and notes: see README.md in this folder.</p>
+</section>
+</main>
+<script type="module">
+const APPROVED = '#2563EB', GREY = '#6B7280', INK = '#111827', WHITE = '#FFFFFF';
+// Each sample: approved and agent SVGs, plus the verifier's ground truth.
+const SAMPLES = [
+{ id:'button', name:'Primary button', defect:'Token — off-palette fill',
+  approvedNote:'Approved: primary fill #2563EB, white label, centred.',
+  agentNote:'Agent: same layout, fill changed to #E53935 — not in the approved palette.',
+  approved: `<svg viewBox="0 0 320 120" xmlns="http://www.w3.org/2000/svg"><rect x="70" y="40" width="180" height="44" rx="8" fill="${APPROVED}"/><text x="160" y="68" text-anchor="middle" font-family="sans-serif" font-size="16" fill="${WHITE}">Continue</text></svg>`,
+  agent: `<svg viewBox="0 0 320 120" xmlns="http://www.w3.org/2000/svg" id="agentSvgEl"><rect x="70" y="40" width="180" height="44" rx="8" fill="#E53935" data-role="primary"/><text x="160" y="68" text-anchor="middle" font-family="sans-serif" font-size="16" fill="${WHITE}">Continue</text></svg>`,
+  model: 'A blue button labelled Continue, centred in the frame. In the agent version the button is red, not the approved blue. That looks like a token error: the fill is outside the approved palette.',
+  palette:[APPROVED, WHITE, INK, GREY] },
+{ id:'disabled', name:'Disabled button', defect:'Missing state — looks enabled',
+  approvedNote:'Approved: disabled button at 45% opacity, grey fill, label "Continue".',
+  agentNote:'Agent: button rendered fully opaque and blue — the disabled state is gone.',
+  approved: `<svg viewBox="0 0 320 120" xmlns="http://www.w3.org/2000/svg"><rect x="70" y="40" width="180" height="44" rx="8" fill="${GREY}" opacity="0.45"/><text x="160" y="68" text-anchor="middle" font-family="sans-serif" font-size="16" fill="${WHITE}">Continue</text></svg>`,
+  agent: `<svg viewBox="0 0 320 120" xmlns="http://www.w3.org/2000/svg" id="agentSvgEl"><rect x="70" y="40" width="180" height="44" rx="8" fill="${APPROVED}" opacity="1" data-role="primary"/><text x="160" y="68" text-anchor="middle" font-family="sans-serif" font-size="16" fill="${WHITE}">Continue</text></svg>`,
+  model: 'A button labelled Continue. In the agent version it looks enabled — full-strength blue, no disabled treatment — while the approved version is dimmed and grey. The disabled state is missing.',
+  palette:[APPROVED, WHITE, INK, GREY], expectsDisabled:true },
+{ id:'card', name:'Card stats', defect:'Spacing — value shifted',
+  approvedNote:'Approved: label left, value right, aligned on one row.',
+  agentNote:'Agent: value shifted 28px down and right — spacing rhythm broken.',
+  approved: `<svg viewBox="0 0 320 140" xmlns="http://www.w3.org/2000/svg"><rect x="20" y="20" width="280" height="100" rx="10" fill="${WHITE}" stroke="#E5E7EB"/><text x="40" y="60" font-family="sans-serif" font-size="15" fill="${GREY}">Revenue</text><text x="260" y="60" text-anchor="end" font-family="sans-serif" font-size="20" font-weight="700" fill="${INK}">$12,400</text><text x="40" y="95" font-family="sans-serif" font-size="13" fill="${GREY}">This month</text></svg>`,
+  agent: `<svg viewBox="0 0 320 140" xmlns="http://www.w3.org/2000/svg" id="agentSvgEl"><rect x="20" y="20" width="280" height="100" rx="10" fill="${WHITE}" stroke="#E5E7EB"/><text x="40" y="60" font-family="sans-serif" font-size="15" fill="${GREY}">Revenue</text><text x="288" y="88" text-anchor="end" font-family="sans-serif" font-size="20" font-weight="700" fill="${INK}" data-role="value">$12,400</text><text x="40" y="95" font-family="sans-serif" font-size="13" fill="${GREY}">This month</text></svg>`,
+  model: 'A stats card with a label and a value. In the agent version the value sits lower and further right than the approved layout — the row alignment and spacing are off.',
+  palette:[APPROVED, WHITE, INK, GREY] },
+{ id:'modal', name:'Modal confirm', defect:'Layout — primary action moved',
+  approvedNote:'Approved: Cancel left, Confirm (blue) right.',
+  agentNote:'Agent: Confirm moved to the left, Cancel to the right — action order flipped.',
+  approved: `<svg viewBox="0 0 320 160" xmlns="http://www.w3.org/2000/svg"><rect x="30" y="20" width="260" height="120" rx="10" fill="${WHITE}" stroke="#E5E7EB"/><text x="50" y="55" font-family="sans-serif" font-size="16" font-weight="700" fill="${INK}">Delete item?</text><text x="50" y="80" font-family="sans-serif" font-size="13" fill="${GREY}">This cannot be undone.</text><rect x="50" y="100" width="80" height="30" rx="6" fill="#E5E7EB"/><text x="90" y="120" text-anchor="middle" font-family="sans-serif" font-size="13" fill="${INK}">Cancel</text><rect x="190" y="100" width="80" height="30" rx="6" fill="${APPROVED}" data-role="primary"/><text x="230" y="120" text-anchor="middle" font-family="sans-serif" font-size="13" fill="${WHITE}">Confirm</text></svg>`,
+  agent: `<svg viewBox="0 0 320 160" xmlns="http://www.w3.org/2000/svg" id="agentSvgEl"><rect x="30" y="20" width="260" height="120" rx="10" fill="${WHITE}" stroke="#E5E7EB"/><text x="50" y="55" font-family="sans-serif" font-size="16" font-weight="700" fill="${INK}">Delete item?</text><text x="50" y="80" font-family="sans-serif" font-size="13" fill="${GREY}">This cannot be undone.</text><rect x="50" y="100" width="80" height="30" rx="6" fill="${APPROVED}" data-role="primary"/><text x="90" y="120" text-anchor="middle" font-family="sans-serif" font-size="13" fill="${WHITE}">Confirm</text><rect x="190" y="100" width="80" height="30" rx="6" fill="#E5E7EB"/><text x="230" y="120" text-anchor="middle" font-family="sans-serif" font-size="13" fill="${INK}">Cancel</text></svg>`,
+  model: 'A confirm dialog. In the agent version the Confirm button is on the left and Cancel on the right — the approved order is reversed. The primary action should be on the right.',
+  palette:[APPROVED, WHITE, INK, GREY] },
+];
+let current = SAMPLES[0];
+const $ = (id) => document.getElementById(id);
+function render(){
+  $('approvedSvg').innerHTML = current.approved;
+  $('agentSvg').innerHTML = current.agent;
+  $('approvedNote').textContent = current.approvedNote;
+  $('agentNote').textContent = current.agentNote;
+  $('modelTitle').textContent = 'Model proposal — ' + current.name;
+  $('modelOut').textContent = current.model;
+  $('modelLabel').textContent = 'Label: PRECOMPUTED STAND-IN (author-written). Live model output, when loaded, appears in section 4 and does not overwrite this stand-in silently.';
+  $('verifierOut').innerHTML = '<p class="small">Press “Run verifier”.</p>';
+  document.querySelectorAll('#sampleBar button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.id === current.id)));
+}
+SAMPLES.forEach(s => {
+  const b = document.createElement('button');
+  b.textContent = s.name; b.dataset.id = s.id; b.setAttribute('aria-pressed','false');
+  b.onclick = () => { current = s; render(); };
+  $('sampleBar').appendChild(b);
+});
+function hexToRgb(h){ const n = parseInt(h.slice(1),16); return [n>>16 & 255, n>>8 & 255, n & 255]; }
+function luminance(rgb){ const f = c => { c/=255; return c <= .03928 ? c/12.92 : Math.pow((c+.055)/1.055,2.4); }; const [r,g,b]=rgb.map(f); return .2126*r+.7152*g+.0722*b; }
+function contrast(a,b){ const l1=luminance(hexToRgb(a)), l2=luminance(hexToRgb(b)); return ((Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05)).toFixed(2); }
+$('verifyBtn').onclick = () => {
+  const el = document.querySelector('#agentSvgEl');
+  const checks = [];
+  if(!el){ $('verifierOut').innerHTML = '<p>Agent SVG not found.</p>'; return; }
+  // Palette: every fill in the agent SVG must be in the approved palette.
+  const fills = [...el.querySelectorAll('[fill]')].map(n => n.getAttribute('fill').toUpperCase());
+  const bad = [...new Set(fills)].filter(f => /^#[0-9A-F]{6}$/.test(f) && !current.palette.map(p=>p.toUpperCase()).includes(f));
+  checks.push(bad.length
+    ? `<span class="fail">FAIL — palette:</span> found fill(s) ${bad.join(', ')} not in approved palette ${current.palette.join(', ')}.`
+    : `<span class="pass">PASS — palette:</span> all fills in approved palette.`);
+  // State: disabled samples must be dimmed/grey.
+  if(current.expectsDisabled){
+    const prim = el.querySelector('[data-role="primary"]');
+    const op = prim ? parseFloat(prim.getAttribute('opacity') || '1') : 1;
+    checks.push(op < 0.8
+      ? `<span class="pass">PASS — disabled state:</span> primary opacity ${op}.`
+      : `<span class="fail">FAIL — disabled state:</span> primary opacity ${op} (expected &lt; 0.8 for a disabled control).`);
+  }
+  // Layout: primary button position for modal, value position for card.
+  const prim = el.querySelector('[data-role="primary"]');
+  if(current.id === 'modal' && prim){
+    const x = parseFloat(prim.getAttribute('x'));
+    checks.push(x < 120
+      ? `<span class="fail">FAIL — layout:</span> primary Confirm at x=${x} (approved: right side, x≈190). Action order flipped.`
+      : `<span class="pass">PASS — layout:</span> primary at x=${x}, right side.`);
+  }
+  if(current.id === 'card'){
+    const v = el.querySelector('[data-role="value"]');
+    const y = v ? parseFloat(v.getAttribute('y')) : null;
+    checks.push(y !== null && y > 70
+      ? `<span class="fail">FAIL — spacing:</span> value at y=${y} (approved row y≈60). Row alignment broken.`
+      : `<span class="pass">PASS — spacing:</span> value on the approved row.`);
+  }
+  checks.push(`Info — contrast (white on approved blue): ${contrast(WHITE, APPROVED)}:1 (WCAG AA for normal text needs 4.5:1).`);
+  $('verifierOut').innerHTML = '<h3>Verifier verdict: ' + (checks.some(c => c.includes('FAIL')) ? '<span class="fail">DEFECT FOUND</span>' : '<span class="pass">PASS</span>') + '</h3><p>' + checks.join('</p><p>') + '</p>';
+};
+let model = null, processor = null;
+$('loadBtn').onclick = async () => {
+  $('loadStatus').textContent = 'Loading… this downloads model files from Hugging Face. If it fails, the error below is shown verbatim and the precomputed examples keep working.';
+  $('loadBtn').disabled = true;
+  try {
+    // BUG FIX (Oct 27): the bare jsDelivr URL resolves to transformers.min.js,
+    // a webpack UMD bundle — NOT an ES module — so `import()` fails with
+    // "Importing a module script failed". The +esm endpoint serves a real ESM build.
+    // Try it first, then a newer version, and report each failure instead of hiding it.
+    const CANDIDATES = [
+      'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1/+esm',
+      'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/+esm',
+      'https://esm.sh/@huggingface/transformers@3.3.1',
+    ];
+    let T = null, lastErr = null;
+    for (const url of CANDIDATES) {
+      try {
+        $('loadStatus').textContent = 'Loading Transformers.js from ' + url + ' …';
+        T = await import(/* webpackIgnore: true */ url);
+        window.__uiCriticTransformers = T;
+        break;
+      } catch (e) { lastErr = e; $('loadStatus').textContent = 'That CDN failed, trying the next one…'; }
+    }
+    if (!T) throw lastErr || new Error('All Transformers.js CDN candidates failed to import.');
+    const { AutoModelForVision2Seq, AutoProcessor, env } = T;
+    env.allowLocalModels = false;
+    if (typeof T.env !== 'undefined' && T.env.backends) { /* keep defaults: WebGPU first, WASM fallback */ }
+    processor = await AutoProcessor.from_pretrained('HuggingFaceTB/SmolVLM-256M-Instruct', {
+      progress_callback: (p) => { if (p.status) $('loadStatus').textContent = `Loading: ${p.status} ${p.file || ''} ${p.progress ? Math.round(p.progress) + '%' : ''}`; }
+    });
+    model = await AutoModelForVision2Seq.from_pretrained('HuggingFaceTB/SmolVLM-256M-Instruct', {
+      dtype: { embed_tokens: 'fp16', vision_encoder: 'q4', decoder_model_merged: 'q4' },
+      device: 'webgpu',
+      progress_callback: (p) => { if (p.status) $('loadStatus').textContent = `Loading model: ${p.status} ${p.file || ''} ${p.progress ? Math.round(p.progress) + '%' : ''}`; }
+    });
+    $('loadStatus').textContent = 'Model loaded. Press “Ask the live model”. If generation is slow, that is the WASM fallback — check your browser’s WebGPU support.';
+    $('askBtn').disabled = false;
+  } catch (e) {
+    $('loadStatus').textContent = 'Live model failed to load (verbatim error below). Precomputed examples above still work.';
+    const pre = $('liveOut'); pre.style.display = 'block'; pre.textContent = 'LOAD ERROR:\n' + (e && (e.stack || e.message) || String(e));
+    $('loadBtn').disabled = false;
+  }
+};
+$('askBtn').onclick = async () => {
+  const pre = $('liveOut'); pre.style.display = 'block'; pre.textContent = 'Running live model on this sample…';
+  try {
+    const T = window.__uiCriticTransformers;
+    if (!T) throw new Error('Transformers.js was not loaded — press “Load SmolVLM” first.');
+    const { load_image } = T;
+    // Render the agent SVG to a PNG so the vision model sees pixels, not markup.
+    const svgText = $('agentSvg').innerHTML;
+    const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = await load_image(url);
+    const messages = [{ role: 'user', content: [
+      { type: 'image' },
+      { type: 'text', text: 'Describe this user interface briefly, then list any design defects you see: wrong colours, missing states, spacing or layout problems. Be specific and short.' },
+    ]}];
+    const text = processor.apply_chat_template(messages, { tokenize: false, add_generation_prompt: true });
+    const inputs = await processor(text, [img], { do_image_splitting: false });
+    const out = await model.generate({ ...inputs, max_new_tokens: 180, do_sample: false });
+    const decoded = processor.batch_decode(out.slice(null, [inputs.input_ids.dims.at(-1), null]), { skip_special_tokens: true });
+    pre.textContent = 'LIVE MODEL OUTPUT (raw, unedited):\n\n' + decoded.join('\n') + '\n\nNote: compare this against the precomputed stand-in in section 2 and the verifier in section 3. If the model missed the defect, that is a real result — record it in the eval table, do not hide it.';
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    pre.textContent = 'LIVE RUN ERROR (verbatim):\n' + (e && (e.stack || e.message) || String(e)) + '\n\nThe precomputed examples and the deterministic verifier still work. Record this failure as a live-run result, not as a missing feature.';
+  }
+};
+render();
+</script>
+</body>
+</html>

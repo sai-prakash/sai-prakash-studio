@@ -1,0 +1,645 @@
+{
+  "name": "Sai Prakash Studio",
+  "version": "1.2",
+  "source": "https://saiprakash.design",
+  "tokens": {
+    "color": {
+      "paper": {
+        "light": "#EAEDF7",
+        "dark": "#0E1233",
+        "role": "Page background"
+      },
+      "paper-2": {
+        "light": "#F5F6FC",
+        "dark": "#151A45",
+        "role": "Raised surface"
+      },
+      "card": {
+        "light": "#FFFFFF",
+        "dark": "#1C2257",
+        "role": "Cards and dialogs"
+      },
+      "ink": {
+        "light": "#12163A",
+        "dark": "#ECEBF7",
+        "role": "Primary text"
+      },
+      "ink-2": {
+        "light": "#4B5180",
+        "dark": "#A2A7D0",
+        "role": "Secondary text"
+      },
+      "line": {
+        "light": "#C6CBE6",
+        "dark": "#2B3268",
+        "role": "Hairlines and borders"
+      },
+      "indigo": {
+        "light": "#2E3BC4",
+        "dark": "#9CA8FF",
+        "role": "Links, focus, what machines read"
+      },
+      "indigo-wash": {
+        "light": "#D9DDF6",
+        "dark": "#1D2460",
+        "role": "Machine-layer surface"
+      },
+      "haldi": {
+        "light": "#F5B82E",
+        "dark": "#F4B731",
+        "role": "Highlight: what a person should notice"
+      },
+      "haldi-wash": {
+        "light": "#F7D681",
+        "dark": "#6B531A",
+        "role": "Soft highlight"
+      },
+      "haldi-ink": {
+        "light": "#8A5A00",
+        "dark": "#F4B731",
+        "role": "Highlight text and labels"
+      },
+      "kumkum": {
+        "light": "#B8322A",
+        "dark": "#FF8A78",
+        "role": "Danger and failure"
+      }
+    },
+    "type": [
+      {
+        "name": "hero",
+        "token": "--fs-hero",
+        "size": "clamp(2.5rem,6.4vw,5.5rem)",
+        "face": "Eczar 600"
+      },
+      {
+        "name": "title",
+        "token": "--fs-2xl",
+        "size": "clamp(1.875rem,3.3vw,2.75rem)",
+        "face": "Eczar 500"
+      },
+      {
+        "name": "rule",
+        "token": "--fs-xl",
+        "size": "clamp(1.375rem,2.2vw,1.875rem)",
+        "face": "Eczar 500"
+      },
+      {
+        "name": "stat",
+        "token": "--fs-stat",
+        "size": "clamp(2.75rem,4.6vw,4rem)",
+        "face": "Eczar 700"
+      },
+      {
+        "name": "lead",
+        "token": "--fs-l",
+        "size": "clamp(1.0625rem,1.2vw,1.1875rem)",
+        "face": "Hanken Grotesk 400"
+      },
+      {
+        "name": "body",
+        "token": "--fs-m",
+        "size": "1rem",
+        "face": "Hanken Grotesk 400"
+      },
+      {
+        "name": "small",
+        "token": "--fs-s",
+        "size": ".875rem",
+        "face": "Hanken Grotesk 400"
+      },
+      {
+        "name": "label",
+        "token": "--fs-xs",
+        "size": ".71875rem",
+        "face": "JetBrains Mono 500"
+      }
+    ],
+    "space": [
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64,
+      96,
+      128
+    ],
+    "radius": {
+      "s": 8,
+      "m": 12,
+      "l": 18,
+      "pill": 999
+    }
+  },
+  "voice": [
+    "Plain words, active voice.",
+    "No exclamation marks and no emoji.",
+    "Buttons say what happens, in four words or fewer."
+  ],
+  "components": {
+    "Screen": {
+      "rule": "One screen holds one to three Sections.",
+      "children": true,
+      "props": {}
+    },
+    "Section": {
+      "rule": "One idea per section. The label names it, the title says it.",
+      "children": true,
+      "props": {
+        "label": {
+          "t": "text",
+          "max": 5
+        },
+        "title": {
+          "t": "text"
+        }
+      },
+      "example": {
+        "type": "Section",
+        "label": "Case file",
+        "title": "Measure the output, not the demo.",
+        "children": [
+          {
+            "type": "Text",
+            "text": "One idea per section, stated in the title.",
+            "tone": "muted"
+          }
+        ]
+      }
+    },
+    "Heading": {
+      "rule": "Headings sit inside a Section and never skip a level.",
+      "children": false,
+      "props": {
+        "text": {
+          "t": "text",
+          "req": true
+        }
+      },
+      "example": {
+        "type": "Section",
+        "title": "A section title",
+        "children": [
+          {
+            "type": "Heading",
+            "text": "A heading inside it"
+          },
+          {
+            "type": "Text",
+            "text": "Then the paragraph it introduces."
+          }
+        ]
+      }
+    },
+    "Text": {
+      "rule": "Short paragraphs, one idea each.",
+      "children": false,
+      "props": {
+        "text": {
+          "t": "text",
+          "req": true
+        },
+        "tone": {
+          "t": [
+            "default",
+            "muted"
+          ]
+        },
+        "size": {
+          "t": [
+            "m",
+            "l"
+          ]
+        }
+      },
+      "example": {
+        "type": "Text",
+        "text": "People read design systems. Now agents read them too.",
+        "size": "l"
+      }
+    },
+    "Label": {
+      "rule": "Labels are mono, upper case, five words at most.",
+      "children": false,
+      "props": {
+        "text": {
+          "t": "text",
+          "req": true,
+          "max": 5
+        }
+      },
+      "example": {
+        "type": "Label",
+        "text": "Case files"
+      }
+    },
+    "Stack": {
+      "rule": "Stack things that are read top to bottom.",
+      "children": true,
+      "props": {
+        "gap": {
+          "t": [
+            "s",
+            "m",
+            "l"
+          ]
+        }
+      },
+      "example": {
+        "type": "Stack",
+        "gap": "s",
+        "children": [
+          {
+            "type": "Text",
+            "text": "First line."
+          },
+          {
+            "type": "Text",
+            "text": "Second line.",
+            "tone": "muted"
+          }
+        ]
+      }
+    },
+    "Row": {
+      "rule": "Put actions or chips that belong together in one row.",
+      "children": true,
+      "props": {},
+      "example": {
+        "type": "Row",
+        "children": [
+          {
+            "type": "Button",
+            "text": "Book a call",
+            "variant": "primary"
+          },
+          {
+            "type": "Button",
+            "text": "Read the notes",
+            "variant": "ghost"
+          }
+        ]
+      }
+    },
+    "Grid": {
+      "rule": "A grid holds items of equal weight. It stacks on phones.",
+      "children": true,
+      "props": {
+        "cols": {
+          "t": [
+            2,
+            3,
+            4
+          ]
+        }
+      },
+      "example": {
+        "type": "Grid",
+        "cols": 2,
+        "children": [
+          {
+            "type": "Stat",
+            "value": "83%",
+            "caption": "less time per task"
+          },
+          {
+            "type": "Stat",
+            "value": "78%",
+            "caption": "less time per document"
+          }
+        ]
+      }
+    },
+    "Card": {
+      "rule": "A card sets one thing apart. Not everything is a card.",
+      "children": true,
+      "props": {
+        "title": {
+          "t": "text"
+        },
+        "tone": {
+          "t": [
+            "plain",
+            "raised"
+          ]
+        }
+      },
+      "example": {
+        "type": "Card",
+        "title": "Deep cut",
+        "tone": "raised",
+        "children": [
+          {
+            "type": "Text",
+            "text": "Architecture, data and who built what.",
+            "tone": "muted"
+          }
+        ]
+      }
+    },
+    "Stat": {
+      "rule": "A big number always says what it counts.",
+      "children": false,
+      "props": {
+        "value": {
+          "t": "text",
+          "req": true
+        },
+        "caption": {
+          "t": "text",
+          "req": true
+        },
+        "label": {
+          "t": "text"
+        }
+      },
+      "example": {
+        "type": "Stat",
+        "label": "PromptForge",
+        "value": "78%",
+        "caption": "less time per document"
+      }
+    },
+    "Button": {
+      "rule": "One primary action per section. The text says what happens.",
+      "children": false,
+      "props": {
+        "text": {
+          "t": "text",
+          "req": true,
+          "max": 4
+        },
+        "variant": {
+          "t": [
+            "primary",
+            "ghost"
+          ]
+        }
+      },
+      "example": {
+        "type": "Row",
+        "children": [
+          {
+            "type": "Button",
+            "text": "Start the tour",
+            "variant": "primary"
+          },
+          {
+            "type": "Button",
+            "text": "Skip for now",
+            "variant": "ghost"
+          }
+        ]
+      }
+    },
+    "Chip": {
+      "rule": "A chip states a status in words, never by color alone.",
+      "children": false,
+      "props": {
+        "text": {
+          "t": "text",
+          "req": true
+        },
+        "tone": {
+          "t": [
+            "neutral",
+            "live",
+            "win"
+          ]
+        }
+      },
+      "example": {
+        "type": "Row",
+        "children": [
+          {
+            "type": "Chip",
+            "text": "Shipped",
+            "tone": "win"
+          },
+          {
+            "type": "Chip",
+            "text": "In build",
+            "tone": "live"
+          },
+          {
+            "type": "Chip",
+            "text": "Draft"
+          }
+        ]
+      }
+    },
+    "Sutra": {
+      "rule": "The one-line rule. Fourteen words at most.",
+      "children": false,
+      "props": {
+        "text": {
+          "t": "text",
+          "req": true,
+          "max": 14
+        }
+      },
+      "example": {
+        "type": "Sutra",
+        "text": "Give the agent twelve kilobytes first."
+      }
+    },
+    "Quote": {
+      "rule": "Quote a person, with their role.",
+      "children": false,
+      "props": {
+        "text": {
+          "t": "text",
+          "req": true
+        },
+        "cite": {
+          "t": "text"
+        }
+      },
+      "example": {
+        "type": "Quote",
+        "text": "If an agent keeps breaking a rule, read the rule again.",
+        "cite": "Notes, October 2026"
+      }
+    },
+    "List": {
+      "rule": "Lists hold two to eight parallel items.",
+      "children": false,
+      "props": {
+        "items": {
+          "t": "list of text",
+          "req": true
+        },
+        "ordered": {
+          "t": "true or false"
+        }
+      },
+      "example": {
+        "type": "List",
+        "items": [
+          "Name a set once.",
+          "State the rule in one line.",
+          "Test that the agent followed it."
+        ]
+      }
+    },
+    "Steps": {
+      "rule": "Steps show a sequence. Mark the step that matters.",
+      "children": false,
+      "props": {
+        "items": {
+          "t": "list of text",
+          "req": true
+        },
+        "key": {
+          "t": "number, 0-based"
+        }
+      },
+      "example": {
+        "type": "Steps",
+        "items": [
+          "Brief",
+          "Write",
+          "Check",
+          "Fix"
+        ],
+        "key": 2
+      }
+    },
+    "Bars": {
+      "rule": "Bars share one scale that starts at zero.",
+      "children": false,
+      "props": {
+        "items": {
+          "t": "list of {name, value}",
+          "req": true
+        },
+        "unit": {
+          "t": "text"
+        },
+        "label": {
+          "t": "text"
+        }
+      },
+      "example": {
+        "type": "Bars",
+        "label": "Minutes per document",
+        "unit": "min",
+        "items": [
+          {
+            "name": "Before",
+            "value": 90
+          },
+          {
+            "name": "After",
+            "value": 20
+          }
+        ]
+      }
+    },
+    "Strings": {
+      "rule": "The signature headline. Up to three lines of 24 characters.",
+      "children": false,
+      "props": {
+        "lines": {
+          "t": "list of text",
+          "req": true
+        }
+      },
+      "example": {
+        "type": "Strings",
+        "lines": [
+          "Built for people.",
+          "Read by agents."
+        ]
+      }
+    },
+    "Field": {
+      "rule": "Every field has a visible label.",
+      "children": false,
+      "props": {
+        "label": {
+          "t": "text",
+          "req": true
+        },
+        "placeholder": {
+          "t": "text"
+        },
+        "kind": {
+          "t": [
+            "text",
+            "email"
+          ]
+        }
+      },
+      "example": {
+        "type": "Field",
+        "label": "Email",
+        "placeholder": "you@example.com",
+        "kind": "email"
+      }
+    },
+    "Divider": {
+      "rule": "The double danda ends a section, the way it ends a verse.",
+      "children": false,
+      "props": {},
+      "example": {
+        "type": "Stack",
+        "gap": "s",
+        "children": [
+          {
+            "type": "Text",
+            "text": "The end of a section.",
+            "tone": "muted"
+          },
+          {
+            "type": "Divider"
+          }
+        ]
+      }
+    }
+  },
+  "checks": [
+    {
+      "id": "json",
+      "name": "Valid JSON"
+    },
+    {
+      "id": "known",
+      "name": "Only system components"
+    },
+    {
+      "id": "props",
+      "name": "No raw styling or unknown props"
+    },
+    {
+      "id": "required",
+      "name": "Required content present"
+    },
+    {
+      "id": "primary",
+      "name": "One primary action per section"
+    },
+    {
+      "id": "structure",
+      "name": "Headings in order",
+      "wcag": "WCAG 1.3.1"
+    },
+    {
+      "id": "labels",
+      "name": "Every field has a label",
+      "wcag": "WCAG 3.3.2"
+    },
+    {
+      "id": "copy",
+      "name": "Copy follows the voice"
+    },
+    {
+      "id": "numbers",
+      "name": "Numbers are real"
+    }
+  ],
+  "agentPrompt": "agent-spec.txt (also in DESIGN.md)"
+}
