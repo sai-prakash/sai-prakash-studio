@@ -2420,7 +2420,18 @@ const Studio = (() => {
     localLoadingDevice = key;
     localLoading = (async () => {
       if (key === "webgpu" && !("gpu" in navigator)) throw { code:"local", message:"This browser has no WebGPU. Use desktop Chrome or Edge, or try a saved run." };
-      status.textContent = "Downloading the on-device model — first run only, about 350 MB, then it is cached in your browser.";
+      // STUCK DIAGNOSIS (Oct 27): after download hits 100%, pipeline() still
+      // spends a long, silent time compiling the ONNX graph for WASM/CPU, and
+      // then generation itself is slow on CPU. With no feedback that looks
+      // exactly like a hang. So this timer keeps the status alive with the
+      // phase and elapsed time, and the progress callback flips the phase
+      // from downloading to compiling when the model file finishes.
+      let phase = "Downloading the on-device model";
+      const loadStart = Date.now();
+      const loadTimer = setInterval(() => {
+        const s = Math.round((Date.now() - loadStart) / 1000);
+        status.textContent = phase + " — " + s + "s elapsed (first run only; the model is then cached). If this number keeps rising, it is working, just slow on CPU.";
+      }, 10000);
       let T;
       try {
         T = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1/+esm");
@@ -2448,15 +2459,17 @@ const Studio = (() => {
           }
           const gen = await T.pipeline("text-generation", "onnx-community/Qwen2.5-Coder-0.5B-Instruct", {
             device: key, dtype: "q4",
-            progress_callback: (pr) => { if (pr && pr.file) lastFile = pr.file; if (pr && pr.status === "progress") { // Transformers.js already reports progress as 0-100, not 0-1 (the old code multiplied by 100 again, hence 400% to 10000%). Prefer loaded/total when present, and clamp.
+            progress_callback: (pr) => { if (pr && pr.file) lastFile = pr.file; if (pr && pr.status === "done" && pr.file && pr.file.indexOf("model") >= 0) phase = "Model downloaded, compiling it for this device"; if (pr && pr.status === "progress") { // Transformers.js already reports progress as 0-100, not 0-1 (the old code multiplied by 100 again, hence 400% to 10000%). Prefer loaded/total when present, and clamp.
               let pct = (pr.total > 0) ? (pr.loaded / pr.total * 100) : (pr.progress > 1 ? pr.progress : pr.progress * 100);
               pct = Math.max(0, Math.min(100, Math.round(pct)));
               status.textContent = "Downloading the on-device model — " + pct + "% (first run only, then cached)."; } }
           });
           gen._T = T; gen._device = key; localGen = gen;
+          clearInterval(loadTimer);
           return gen;
         } catch (e) { hostErrors.push((host || "Hugging Face") + ": " + (e && e.message ? e.message : String(e)) + (lastFile ? " (while fetching " + lastFile + ")" : "")); localGen = null; }
       }
+      clearInterval(loadTimer);
       throw { code:"local", message:"The on-device model failed to download from both hosts — " + hostErrors.join(" · ") + " If both say \u201cFailed to fetch\u201d, the network itself is blocking Hugging Face from this browser: open https://huggingface.co/onnx-community/Qwen2.5-Coder-0.5B-Instruct in the same browser, and test from the deployed site (one stable https origin), not a changing localhost preview. Clear this site's Cache Storage once first (DevTools → Application → Cache Storage)." };
     })();
     try { return await localLoading; } catch (e) { localLoading = null; throw e; }
@@ -2477,17 +2490,27 @@ const Studio = (() => {
         // Plain chat-template string, not the messages API, so this works on Transformers.js 3.x as well as 4.x.
         const prompt = "<|im_start|>system\n" + agentSpec() + "<|im_end|>\n<|im_start|>user\n" + agentUser(brief, previous, violations) + "<|im_end|>\n<|im_start|>assistant\n";
         let out = "";
+        let tokens = 0;
+        const genStart = Date.now();
+        const genTimer = setInterval(() => {
+          const s = Math.round((Date.now() - genStart) / 1000);
+          status.textContent = "Generating on-device (" + device + ") — " + tokens + " tokens so far, " + s + "s elapsed. A small screen is usually 150–300 tokens. If tokens keep rising, it is working, just slow on CPU.";
+        }, 10000);
         let streamer = null;
-        try { streamer = new T.TextStreamer(gen.tokenizer, { skip_prompt:true, skip_special_tokens:true, callback_function: (text) => { out += text; onText(out); } }); } catch (e) { streamer = null; }
+        try { streamer = new T.TextStreamer(gen.tokenizer, { skip_prompt:true, skip_special_tokens:true, callback_function: (text) => { out += text; tokens++; onText(out); } }); } catch (e) { streamer = null; }
         let res;
         try {
-          const opts = { max_new_tokens: 640, do_sample: false, return_full_text: false };
+          // Was 640: on WASM/CPU that is several minutes even for a good run,
+          // and a small screen's JSON is ~250 tokens. 400 still allows two sections.
+          const opts = { max_new_tokens: 400, do_sample: false, return_full_text: false };
           if (streamer) opts.streamer = streamer;
           res = await gen(prompt, opts);
         } catch (e) {
+          clearInterval(genTimer);
           if (e && e.name === "AbortError") throw { code:"cancelled" };
           throw e;
         }
+        clearInterval(genTimer);
         let txt = out;
         if (!txt) {
           const g = res && res[0] && res[0].generated_text;
