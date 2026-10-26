@@ -2412,12 +2412,14 @@ const Studio = (() => {
   // 0.5B is small on purpose: it loads in a browser tab. It will sometimes return
   // bad JSON or a wrong component — that is what the 9 checks below are for, and
   // the second attempt sends the failures back to the same model.
-  let localGen = null, localLoading = null;
-  async function loadLocal(){
-    if (localGen) return localGen;
-    if (localLoading) return localLoading;
+  let localGen = null, localLoading = null, localLoadingDevice = null;
+  async function loadLocal(device){
+    const key = device || "webgpu";
+    if (localGen && localGen._device === key) return localGen;
+    if (localLoading && localLoadingDevice === key) return localLoading;
+    localLoadingDevice = key;
     localLoading = (async () => {
-      if (!("gpu" in navigator)) throw { code:"local", message:"This browser has no WebGPU. Use desktop Chrome or Edge, or try a saved run." };
+      if (key === "webgpu" && !("gpu" in navigator)) throw { code:"local", message:"This browser has no WebGPU. Use desktop Chrome or Edge, or try a saved run." };
       status.textContent = "Downloading the on-device model — first run only, about 350 MB, then it is cached in your browser.";
       let T;
       try {
@@ -2432,55 +2434,80 @@ const Studio = (() => {
       // preview, then the deployed site), the cached header no longer matches and
       // the browser blocks tokenizer.json / model_q4.onnx even though the files exist.
       // jsDelivr's HF mirror did not serve this repo (version-info failure), so the
-      // fallback is hf-mirror.com, which proxies the same HF files. If both fail,
-      // the message below says to clear Cache Storage once and stick to one origin.
+      // fallback is hf-mirror.com, which proxies the same HF files. Each host's
+      // error is kept, so the final message names the failing host and file.
       const hosts = [null, "https://hf-mirror.com"];
-      let lastErr = null;
+      const hostErrors = [];
+      let lastFile = "";
       for (const host of hosts) {
         try {
           if (host) {
             T.env.remoteHost = host;
             T.env.remotePathTemplate = "{model}/resolve/{revision}/{file}";
-            status.textContent = "Hugging Face blocked the download (CORS), retrying from the mirror — first run only, about 350 MB, then cached.";
+            status.textContent = "Hugging Face blocked the download, retrying from the mirror — first run only, about 350 MB, then cached.";
           }
-          localGen = await T.pipeline("text-generation", "onnx-community/Qwen2.5-Coder-0.5B-Instruct", {
-            device: "webgpu", dtype: "q4",
-            progress_callback: (pr) => { if (pr && pr.status === "progress" && pr.progress) status.textContent = "Downloading the on-device model — " + Math.round(pr.progress * 100) + "% (first run only, then cached)."; }
+          const gen = await T.pipeline("text-generation", "onnx-community/Qwen2.5-Coder-0.5B-Instruct", {
+            device: key, dtype: "q4",
+            progress_callback: (pr) => { if (pr && pr.file) lastFile = pr.file; if (pr && pr.status === "progress" && pr.progress) status.textContent = "Downloading the on-device model — " + Math.round(pr.progress * 100) + "% (first run only, then cached)."; }
           });
-          localGen._T = T;
-          return localGen;
-        } catch (e) { lastErr = e; localGen = null; }
+          gen._T = T; gen._device = key; localGen = gen;
+          return gen;
+        } catch (e) { hostErrors.push((host || "Hugging Face") + ": " + (e && e.message ? e.message : String(e)) + (lastFile ? " (while fetching " + lastFile + ")" : "")); localGen = null; }
       }
-      throw { code:"local", message:"The on-device model failed to download from both Hugging Face and the mirror: " + (lastErr && lastErr.message ? lastErr.message : String(lastErr)) + " Clear this site's Cache Storage once (DevTools → Application → Cache Storage), then reopen from one stable address — the deployed site, not a changing localhost preview — and try again." };
+      throw { code:"local", message:"The on-device model failed to download from both hosts — " + hostErrors.join(" · ") + " If both say \u201cFailed to fetch\u201d, the network itself is blocking Hugging Face from this browser: open https://huggingface.co/onnx-community/Qwen2.5-Coder-0.5B-Instruct in the same browser, and test from the deployed site (one stable https origin), not a changing localhost preview. Clear this site's Cache Storage once first (DevTools → Application → Cache Storage)." };
     })();
     try { return await localLoading; } catch (e) { localLoading = null; throw e; }
   }
   async function viaLocal(brief, previous, violations){
-    const gen = await loadLocal();
-    const T = gen._T;
-    // Plain chat-template string, not the messages API, so this works on Transformers.js 3.x as well as 4.x.
-    const prompt = "<|im_start|>system\n" + agentSpec() + "<|im_end|>\n<|im_start|>user\n" + agentUser(brief, previous, violations) + "<|im_end|>\n<|im_start|>assistant\n";
-    let out = "";
-    // TextStreamer is the streaming path; if this Transformers.js version
-    // shapes it differently, fall back to the full result instead of failing.
-    let streamer = null;
-    try { streamer = new T.TextStreamer(gen.tokenizer, { skip_prompt:true, skip_special_tokens:true, callback_function: (text) => { out += text; onText(out); } }); } catch (e) { streamer = null; }
-    let res;
-    try {
-      const opts = { max_new_tokens: 640, do_sample: false, return_full_text: false };
-      if (streamer) opts.streamer = streamer;
-      res = await gen(prompt, opts);
-    } catch (e) {
-      if (e && e.name === "AbortError") throw { code:"cancelled" };
-      throw { code:"local", message:"The on-device model failed while generating: " + (e && e.message ? e.message : String(e)) };
+    // Safari's WebGPU does not support this model's GroupQueryAttention rotary
+    // kernel (reported Oct 27: "do_rotary attribute is not supported"), so Safari
+    // goes straight to WASM — still fully on-device, just slower. Any other
+    // browser starts on WebGPU and falls back to WASM only if a WebGPU kernel
+    // fails during generation.
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    const devices = isSafari ? ["wasm"] : ["webgpu", "wasm"];
+    let lastErr = null;
+    for (const device of devices) {
+      try {
+        const gen = await loadLocal(device);
+        const T = gen._T;
+        // Plain chat-template string, not the messages API, so this works on Transformers.js 3.x as well as 4.x.
+        const prompt = "<|im_start|>system\n" + agentSpec() + "<|im_end|>\n<|im_start|>user\n" + agentUser(brief, previous, violations) + "<|im_end|>\n<|im_start|>assistant\n";
+        let out = "";
+        let streamer = null;
+        try { streamer = new T.TextStreamer(gen.tokenizer, { skip_prompt:true, skip_special_tokens:true, callback_function: (text) => { out += text; onText(out); } }); } catch (e) { streamer = null; }
+        let res;
+        try {
+          const opts = { max_new_tokens: 640, do_sample: false, return_full_text: false };
+          if (streamer) opts.streamer = streamer;
+          res = await gen(prompt, opts);
+        } catch (e) {
+          if (e && e.name === "AbortError") throw { code:"cancelled" };
+          throw e;
+        }
+        let txt = out;
+        if (!txt) {
+          const g = res && res[0] && res[0].generated_text;
+          txt = typeof g === "string" ? g : "";
+        }
+        if (!txt || txt.indexOf("{") < 0) throw { code:"local", message:"The on-device model did not return JSON. It is a 0.5B model — try a shorter, simpler brief, like \u201ca sign-up card for a book club\u201d." };
+        const engine = device === "wasm" ? "Qwen2.5-Coder 0.5B, on your device (WASM — Safari WebGPU fallback)" : "Qwen2.5-Coder 0.5B, on your device (WebGPU, q4)";
+        return { text: txt, engine: engine };
+      } catch (e) {
+        if (e && (e.code === "cancelled" || e.code === "local")) throw e;
+        const msg = e && e.message ? e.message : String(e);
+        const isWebGPUKernel = /webgpu|kernel|GroupQueryAttention|do_rotary/i.test(msg);
+        if (device === "webgpu" && isWebGPUKernel) {
+          lastErr = e;
+          status.textContent = "This browser's WebGPU cannot run this model's attention kernel, falling back to on-device CPU (WASM) — slower, same privacy.";
+          try { if (localGen && localGen.dispose) await localGen.dispose(); } catch (d) {}
+          localGen = null; localLoading = null;
+          continue;
+        }
+        throw { code:"local", message:"The on-device model failed while generating: " + msg };
+      }
     }
-    let txt = out;
-    if (!txt) {
-      const g = res && res[0] && res[0].generated_text;
-      txt = typeof g === "string" ? g : "";
-    }
-    if (!txt || txt.indexOf("{") < 0) throw { code:"local", message:"The on-device model did not return JSON. It is a 0.5B model — try a shorter, simpler brief, like \u201ca sign-up card for a book club\u201d." };
-    return { text: txt, engine: "Qwen2.5-Coder 0.5B, on your device (WebGPU, q4)" };
+    throw { code:"local", message:"The on-device model failed on WebGPU and on WASM: " + (lastErr && lastErr.message ? lastErr.message : String(lastErr)) };
   }
   function setBusy(b){ busy = b; go.textContent = b ? "Stop" : "Build"; }
   async function build({ brief, run, local }){
