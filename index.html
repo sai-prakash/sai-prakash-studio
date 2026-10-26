@@ -1062,6 +1062,7 @@ footer a{color:var(--ink-2)}
         <label class="sr" for="brief">Brief for the agent</label>
         <input id="brief" maxlength="200" placeholder="Describe a screen, like a sign-up card for a book club">
         <button class="btn" type="submit" id="stGo">Build</button>
+        <button class="btn" type="button" id="stLocal">Build on-device</button>
       </form>
       <div class="st-runs">
         <p class="wt-k" id="runsLabel">Or replay a saved run</p>
@@ -2322,7 +2323,7 @@ const System = (() => {
    STUDIO: an agent builds with the system, the checks grade it
    ========================================================= */
 const Studio = (() => {
-  const form = $("#stForm"), input = $("#brief"), go = $("#stGo"), screen = $("#stScreen"), code = $("#stCode"), list = $("#stChecks"),
+  const form = $("#stForm"), input = $("#brief"), go = $("#stGo"), localBtn = $("#stLocal"), screen = $("#stScreen"), code = $("#stCode"), list = $("#stChecks"),
         score = $("#stScore"), status = $("#stStatus"), engineChip = $("#stEngine"), att = $("#stAttempts"), steps = $("#stSteps"), note = $("#stNote");
   const GONE = ["not_granted","sampling_disabled","not_declared","capability_disabled","capability_removed"];
   let sampleFn = null, ctl = null, busy = false, lastText = "", renderT = 0, runId = 0;
@@ -2405,16 +2406,76 @@ const Studio = (() => {
     const { text } = await sampleFn(agentSpec() + "\n\n" + agentUser(brief, previous, violations), { modelTier:"quick", signal, onText: ({ text }) => onText(text) });
     return { text, engine:"Claude, on your account" };
   }
+  // ---- On-device LLM: a real model, in the visitor's browser, via WebGPU ----
+  // Model verified on the Hugging Face API Oct 27, 2026: onnx-community/Qwen2.5-Coder-0.5B-Instruct,
+  // library transformers.js, pipeline text-generation, with an onnx/model_q4.onnx file.
+  // 0.5B is small on purpose: it loads in a browser tab. It will sometimes return
+  // bad JSON or a wrong component — that is what the 9 checks below are for, and
+  // the second attempt sends the failures back to the same model.
+  let localGen = null, localLoading = null;
+  async function loadLocal(){
+    if (localGen) return localGen;
+    if (localLoading) return localLoading;
+    localLoading = (async () => {
+      if (!("gpu" in navigator)) throw { code:"local", message:"This browser has no WebGPU. Use desktop Chrome or Edge, or try a saved run." };
+      status.textContent = "Downloading the on-device model — first run only, about 350 MB, then it is cached in your browser.";
+      let T;
+      try {
+        T = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1/+esm");
+      } catch (e) {
+        throw { code:"local", message:"Could not load Transformers.js from the CDN. Check your connection and try again." };
+      }
+      T.env.allowLocalModels = false;
+      try {
+        localGen = await T.pipeline("text-generation", "onnx-community/Qwen2.5-Coder-0.5B-Instruct", {
+          device: "webgpu", dtype: "q4",
+          progress_callback: (pr) => { if (pr && pr.status === "progress" && pr.progress) status.textContent = "Downloading the on-device model — " + Math.round(pr.progress * 100) + "% (first run only, then cached)."; }
+        });
+      } catch (e) {
+        throw { code:"local", message:"The on-device model failed to load on this device: " + (e && e.message ? e.message : String(e)) };
+      }
+      localGen._T = T;
+      return localGen;
+    })();
+    try { return await localLoading; } catch (e) { localLoading = null; throw e; }
+  }
+  async function viaLocal(brief, previous, violations){
+    const gen = await loadLocal();
+    const T = gen._T;
+    // Plain chat-template string, not the messages API, so this works on Transformers.js 3.x as well as 4.x.
+    const prompt = "<|im_start|>system\n" + agentSpec() + "<|im_end|>\n<|im_start|>user\n" + agentUser(brief, previous, violations) + "<|im_end|>\n<|im_start|>assistant\n";
+    let out = "";
+    // TextStreamer is the streaming path; if this Transformers.js version
+    // shapes it differently, fall back to the full result instead of failing.
+    let streamer = null;
+    try { streamer = new T.TextStreamer(gen.tokenizer, { skip_prompt:true, skip_special_tokens:true, callback_function: (text) => { out += text; onText(out); } }); } catch (e) { streamer = null; }
+    let res;
+    try {
+      const opts = { max_new_tokens: 640, do_sample: false, return_full_text: false };
+      if (streamer) opts.streamer = streamer;
+      res = await gen(prompt, opts);
+    } catch (e) {
+      if (e && e.name === "AbortError") throw { code:"cancelled" };
+      throw { code:"local", message:"The on-device model failed while generating: " + (e && e.message ? e.message : String(e)) };
+    }
+    let txt = out;
+    if (!txt) {
+      const g = res && res[0] && res[0].generated_text;
+      txt = typeof g === "string" ? g : "";
+    }
+    if (!txt || txt.indexOf("{") < 0) throw { code:"local", message:"The on-device model did not return JSON. It is a 0.5B model — try a shorter, simpler brief, like \u201ca sign-up card for a book club\u201d." };
+    return { text: txt, engine: "Qwen2.5-Coder 0.5B, on your device (WebGPU, q4)" };
+  }
   function setBusy(b){ busy = b; go.textContent = b ? "Stop" : "Build"; }
-  async function build({ brief, run }){
+  async function build({ brief, run, local }){
     if (ctl) ctl.abort();
     const my = ++runId, live = () => my === runId;
     ctl = new AbortController(); const signal = ctl.signal;
-    const mode = run ? "saved" : AGENT_ENDPOINT ? "proxy" : sampleFn ? "claude" : null;
+    const mode = run ? "saved" : local ? "local" : AGENT_ENDPOINT ? "proxy" : sampleFn ? "claude" : null;
     $$("#stRuns button").forEach(b => b.setAttribute("aria-pressed", String(!!run && b.dataset.run === run.id)));
     if (!mode) { setBusy(false); status.textContent = "Live building runs on Sai's own site, where his agent server lives. Here, replay a saved run to see the whole loop."; return; }
     setBusy(true);
-    engineChip.textContent = mode === "saved" ? "Saved run" : mode === "claude" ? "Claude, on your account" : "Connecting…";
+    engineChip.textContent = mode === "saved" ? "Saved run" : mode === "local" ? "On-device LLM" : mode === "claude" ? "Claude, on your account" : "Connecting…";
     att.textContent = ""; list.innerHTML = ""; score.textContent = ""; screen.innerHTML = ""; code.textContent = ""; lastText = "";
     let previous = null, violations = [];
     const summary = [];
@@ -2424,12 +2485,13 @@ const Studio = (() => {
       try {
         if (mode === "saved") res = await replay(pretty(run.attempts[attempt - 1]), signal);
         else if (mode === "proxy") res = await viaProxy(brief, previous, violations, signal);
+        else if (mode === "local") res = await viaLocal(brief, previous, violations);
         else res = await viaClaude(brief, previous, violations, signal);
       } catch (e) {
         if (!live()) return;
         const cancelled = e && (e.code === "cancelled" || e.name === "AbortError");
         if (mode === "claude" && e && GONE.includes(e.code)) { sampleFn = null; setNote(); }
-        status.textContent = cancelled ? "Stopped." : (e && e.code === "http") ? e.message : e && e.code === "rate_limited" ? "Claude is busy for your account right now. Try a saved run." : "The agent couldn't answer just now. Try a saved run.";
+        status.textContent = cancelled ? "Stopped." : (e && e.code === "local") ? e.message : (e && e.code === "http") ? e.message : e && e.code === "rate_limited" ? "Claude is busy for your account right now. Try a saved run." : "The agent couldn't answer just now. Try a saved run.";
         stage(""); setBusy(false); return;
       }
       if (!live()) return;
@@ -2451,6 +2513,12 @@ const Studio = (() => {
     }
     setBusy(false);
   }
+  localBtn.addEventListener("click", () => {
+    if (busy) { if (ctl) ctl.abort(); return; }
+    const b = input.value.trim();
+    if (b.length < 4) { status.textContent = "Write a brief of a few words first."; input.focus(); return; }
+    build({ brief: b, local: true });
+  });
   form.addEventListener("submit", e => {
     e.preventDefault();
     if (busy) { if (ctl) ctl.abort(); return; }
