@@ -430,6 +430,8 @@ h2{margin:1rem 0 0;font-family:var(--f-display);font-weight:500;font-size:var(--
 .ds-unknown{padding:12px;border-radius:12px;font-family:var(--f-mono);font-size:.75rem;color:var(--kumkum);border:1px dashed var(--kumkum)}
 .ds-screen [data-bad]{outline:2px dashed var(--kumkum);outline-offset:4px;border-radius:6px}
 
+#stStatus.local-live::after{content:" \25cf";animation:stpulse 1s ease-in-out infinite}
+@keyframes stpulse{0%,100%{opacity:.25}50%{opacity:1}}
 /* ---------- studio ---------- */
 .st-form{display:flex;gap:10px;align-items:stretch;margin-top:3rem;border-bottom:2px solid var(--ink);padding-bottom:10px;max-width:56rem}
 .st-form input{flex:1;min-width:0;width:100%;min-height:48px;border:0;background:transparent;color:var(--ink);font-family:var(--f-display);font-size:clamp(1.0625rem,1.5vw,1.3125rem)}
@@ -2474,7 +2476,124 @@ const Studio = (() => {
     })();
     try { return await localLoading; } catch (e) { localLoading = null; throw e; }
   }
+
+  // ---- Live updates: generation runs in a Web Worker, not on the main thread ----
+  // WHY THE OLD VERSION SHOWED NO UPDATES: on Safari/WASM, a single prompt
+  // prefill and each token decode are long synchronous WASM runs on the main
+  // thread. While JS is blocked like that, setInterval timers and the
+  // TextStreamer callback cannot run, so the status froze and no tokens
+  // appeared — even though the model was working. Moving generation to a
+  // worker leaves the main thread free, so tokens, timers and the status
+  // update live. If a worker cannot be created (old browser, module-worker
+  // restrictions), it falls back to the main-thread version above.
+  const WORKER_CODE = [
+    'import { pipeline, env, TextStreamer } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1/+esm";',
+    'let gen = null, genDevice = null;',
+    'self.onmessage = async (e) => {',
+    '  const d = e.data;',
+    '  if (!d || d.type !== "generate") return;',
+    '  try {',
+    '    if (!gen || genDevice !== d.device) {',
+    '      env.allowLocalModels = false;',
+    '      const hosts = [null, "https://hf-mirror.com"];',
+    '      let lastErr = null;',
+    '      for (const host of hosts) {',
+    '        try {',
+    '          if (host) { env.remoteHost = host; env.remotePathTemplate = "{model}/resolve/{revision}/{file}"; }',
+    '          gen = await pipeline("text-generation", "onnx-community/Qwen2.5-Coder-0.5B-Instruct", { device: d.device, dtype: "q4", progress_callback: (pr) => { self.postMessage({ type: "progress", status: pr.status, file: pr.file, progress: pr.progress, loaded: pr.loaded, total: pr.total }); } });',
+    '          genDevice = d.device; break;',
+    '        } catch (err) { lastErr = err; gen = null; }',
+    '      }',
+    '      if (!gen) throw lastErr || new Error("Model load failed");',
+    '    }',
+    '    let out = "";',
+    '    const streamer = new TextStreamer(gen.tokenizer, { skip_prompt: true, skip_special_tokens: true, callback_function: (text) => { out += text; self.postMessage({ type: "token", text: text }); } });',
+    '    const res = await gen(d.prompt, { max_new_tokens: 400, do_sample: false, streamer: streamer, return_full_text: false });',
+    '    if (!out) { const g = res && res[0] && res[0].generated_text; out = typeof g === "string" ? g : ""; }',
+    '    self.postMessage({ type: "done", text: out });',
+    '  } catch (err) {',
+    '    self.postMessage({ type: "error", message: err && err.message ? err.message : String(err) });',
+    '  }',
+    '};',
+  ].join("\n");
+  let localWorker = null, localWorkerDevice = null;
+  function getLocalWorker(device){
+    if (localWorker && localWorkerDevice === device) return localWorker;
+    if (localWorker) { try { localWorker.terminate(); } catch (e) {} }
+    const blob = new Blob([WORKER_CODE], { type: "text/javascript" });
+    localWorker = new Worker(URL.createObjectURL(blob), { type: "module" });
+    localWorkerDevice = device;
+    return localWorker;
+  }
+  async function viaLocalWorker(brief, previous, violations, device){
+    const prompt = "<|im_start|>system\\n" + agentSpec() + "<|im_end|>\\n<|im_start|>user\\n" + agentUser(brief, previous, violations) + "<|im_end|>\\n<|im_start|>assistant\\n";
+    const worker = getLocalWorker(device);
+    status.classList.add("local-live");
+    return new Promise((resolve, reject) => {
+      let out = "", tokens = 0, phase = "Downloading the on-device model";
+      const start = Date.now();
+      const timer = setInterval(() => {
+        const s = Math.round((Date.now() - start) / 1000);
+        status.textContent = phase + " — " + tokens + " tokens, " + s + "s elapsed. Tokens rising means it is generating live.";
+      }, 5000);
+      const onErr = (ev) => { cleanup(); reject({ code:"worker-start", message: (ev && ev.message) ? ev.message : "Worker failed to start" }); };
+      const cleanup = () => { clearInterval(timer); status.classList.remove("local-live"); worker.removeEventListener("message", handler); worker.removeEventListener("error", onErr); };
+      const handler = (e) => {
+        const d = e.data; if (!d) return;
+        if (d.type === "progress") {
+          if (d.status === "done" && d.file && d.file.indexOf("model") >= 0) phase = "Model downloaded, compiling it for this device";
+          else if (d.status === "progress") {
+            let pct = (d.total > 0) ? (d.loaded / d.total * 100) : (d.progress > 1 ? d.progress : d.progress * 100);
+            pct = Math.max(0, Math.min(100, Math.round(pct)));
+            status.textContent = "Downloading the on-device model — " + pct + "% (first run only, then cached).";
+          }
+        } else if (d.type === "token") {
+          out += d.text; tokens++; onText(out);
+          status.textContent = "Generating on-device (" + device + ") — " + tokens + " tokens so far. Watch the code pane fill live.";
+        } else if (d.type === "done") {
+          cleanup();
+          if (!out || out.indexOf("{") < 0) { reject({ code:"local", message:"The on-device model did not return JSON. It is a 0.5B model — try a shorter, simpler brief, like \\u201ca sign-up card for a book club\\u201d." }); return; }
+          const engine = device === "wasm" ? "Qwen2.5-Coder 0.5B, on your device (WASM — Safari WebGPU fallback)" : "Qwen2.5-Coder 0.5B, on your device (WebGPU, q4)";
+          resolve({ text: out, engine: engine });
+        } else if (d.type === "error") {
+          cleanup();
+          reject({ code:"local-worker", message: d.message || "Worker error" });
+        }
+      };
+      worker.addEventListener("message", handler);
+      worker.addEventListener("error", onErr);
+      worker.postMessage({ type: "generate", prompt: prompt, device: device });
+    });
+  }
   async function viaLocal(brief, previous, violations){
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    const devices = isSafari ? ["wasm"] : ["webgpu", "wasm"];
+    for (const device of devices) {
+      try {
+        // Worker first (live updates); worker creation failure falls back to main thread.
+        let worker;
+        try { worker = getLocalWorker(device); } catch (e) { worker = null; }
+        if (worker) return await viaLocalWorker(brief, previous, violations, device);
+        return await viaLocalMain(brief, previous, violations);
+      } catch (e) {
+        if (e && e.code === "worker-start") { status.textContent = "Worker could not start in this browser, running on the main thread instead — updates may pause during generation."; return await viaLocalMain(brief, previous, violations); }
+        if (e && (e.code === "cancelled" || e.code === "local")) throw e;
+        const msg = e && e.message ? e.message : String(e);
+        const isWebGPUKernel = /webgpu|kernel|GroupQueryAttention|do_rotary/i.test(msg);
+        if (device === "webgpu" && isWebGPUKernel) {
+          if (localWorker) { try { localWorker.terminate(); } catch (d) {} localWorker = null; }
+          localGen = null; localLoading = null;
+          status.textContent = "This browser's WebGPU cannot run this model's attention kernel, falling back to on-device CPU (WASM) — slower, same privacy.";
+          continue;
+        }
+        // Worker load/download errors carry code local-worker; surface them as local errors.
+        if (e && e.code === "local-worker") throw { code:"local", message:"The on-device model failed (worker): " + msg + " Clear this site's Cache Storage once, then reopen from one stable address — the deployed site, not a changing localhost preview." };
+        throw { code:"local", message:"The on-device model failed while generating: " + msg };
+      }
+    }
+    throw { code:"local", message:"The on-device model failed on WebGPU and on WASM." };
+  }
+  async function viaLocalMain(brief, previous, violations){
     // Safari's WebGPU does not support this model's GroupQueryAttention rotary
     // kernel (reported Oct 27: "do_rotary attribute is not supported"), so Safari
     // goes straight to WASM — still fully on-device, just slower. Any other
