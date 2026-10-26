@@ -2426,16 +2426,32 @@ const Studio = (() => {
         throw { code:"local", message:"Could not load Transformers.js from the CDN. Check your connection and try again." };
       }
       T.env.allowLocalModels = false;
-      try {
-        localGen = await T.pipeline("text-generation", "onnx-community/Qwen2.5-Coder-0.5B-Instruct", {
-          device: "webgpu", dtype: "q4",
-          progress_callback: (pr) => { if (pr && pr.status === "progress" && pr.progress) status.textContent = "Downloading the on-device model — " + Math.round(pr.progress * 100) + "% (first run only, then cached)."; }
-        });
-      } catch (e) {
-        throw { code:"local", message:"The on-device model failed to load on this device: " + (e && e.message ? e.message : String(e)) };
+      // CORS FIX (Oct 27): Hugging Face now serves this model through its Xet CDN,
+      // which echoes Access-Control-Allow-Origin for ONE origin and caches it. If you
+      // open the page from a different origin (a Muse file link, then a localhost
+      // preview, then the deployed site), the cached header no longer matches and
+      // the browser blocks tokenizer.json / model_q4.onnx even though the files exist.
+      // jsDelivr's HF mirror did not serve this repo (version-info failure), so the
+      // fallback is hf-mirror.com, which proxies the same HF files. If both fail,
+      // the message below says to clear Cache Storage once and stick to one origin.
+      const hosts = [null, "https://hf-mirror.com"];
+      let lastErr = null;
+      for (const host of hosts) {
+        try {
+          if (host) {
+            T.env.remoteHost = host;
+            T.env.remotePathTemplate = "{model}/resolve/{revision}/{file}";
+            status.textContent = "Hugging Face blocked the download (CORS), retrying from the mirror — first run only, about 350 MB, then cached.";
+          }
+          localGen = await T.pipeline("text-generation", "onnx-community/Qwen2.5-Coder-0.5B-Instruct", {
+            device: "webgpu", dtype: "q4",
+            progress_callback: (pr) => { if (pr && pr.status === "progress" && pr.progress) status.textContent = "Downloading the on-device model — " + Math.round(pr.progress * 100) + "% (first run only, then cached)."; }
+          });
+          localGen._T = T;
+          return localGen;
+        } catch (e) { lastErr = e; localGen = null; }
       }
-      localGen._T = T;
-      return localGen;
+      throw { code:"local", message:"The on-device model failed to download from both Hugging Face and the mirror: " + (lastErr && lastErr.message ? lastErr.message : String(lastErr)) + " Clear this site's Cache Storage once (DevTools → Application → Cache Storage), then reopen from one stable address — the deployed site, not a changing localhost preview — and try again." };
     })();
     try { return await localLoading; } catch (e) { localLoading = null; throw e; }
   }
